@@ -401,13 +401,29 @@ MODEL_URLS = {
 
 
 def parse_args(mMain=True):
+    # 导入argparse库，用于处理命令行参数
     import argparse
+
+    # 初始化参数解析器
     parser = init_args()
+
+    # 如果mMain为True（默认），则在解析器中添加帮助
     parser.add_help = mMain
+
+    # 添加参数，用于指定语言，默认为'ch'（中文）
     parser.add_argument("--lang", type=str, default='ch')
+
+    # 添加参数，用于指定是否进行检测，默认为True
     parser.add_argument("--det", type=str2bool, default=True)
+
+    # 添加参数，用于指定是否进行识别，默认为True
     parser.add_argument("--rec", type=str2bool, default=True)
+
+    # 添加参数，用于指定类型，默认为'ocr'（光学字符识别）
     parser.add_argument("--type", type=str, default='ocr')
+
+    # 添加参数，用于指定OCR模型的版本
+    # 提供了一些预设的选择，并设置了默认值和帮助信息
     parser.add_argument(
         "--ocr_version",
         type=str,
@@ -418,6 +434,9 @@ def parse_args(mMain=True):
         '2. PP-OCRv2 Support Chinese detection and recognition model. '
         '3. PP-OCR support Chinese detection, recognition and direction classifier and multilingual recognition model.'
     )
+
+    # 添加参数，用于指定表格结构识别模型的版本
+    # 提供了一些预设的选择，并设置了默认值和帮助信息
     parser.add_argument(
         "--structure_version",
         type=str,
@@ -427,11 +446,15 @@ def parse_args(mMain=True):
         ' 1. PP-Structure Support en table structure model.'
         ' 2. PP-StructureV2 Support ch and en table structure model.')
 
+    # 对于一些特定的参数，将它们的默认值设为None
     for action in parser._actions:
         if action.dest in [
                 'rec_char_dict_path', 'table_char_dict_path', 'layout_dict_path'
         ]:
             action.default = None
+
+    # 如果mMain为True，直接返回解析的参数
+    # 否则，将解析器中的所有动作（参数）及其默认值转换为字典，然后返回一个命名空间对象
     if mMain:
         return parser.parse_args()
     else:
@@ -439,6 +462,7 @@ def parse_args(mMain=True):
         for action in parser._actions:
             inference_args_dict[action.dest] = action.default
         return argparse.Namespace(**inference_args_dict)
+
 
 
 def parse_lang(lang):
@@ -555,64 +579,82 @@ def check_img(img):
     return img
 
 
+# 这个类是PaddleOCR系统的封装，允许你使用PaddleOCR进行OCR（光学字符识别） 继承了TextSystem
 class PaddleOCR(predict_system.TextSystem):
+
+    # 构造方法
     def __init__(self, **kwargs):
         """
-        paddleocr package
-        args:
-            **kwargs: other params show in paddleocr --help
+        paddleocr包
+        参数:
+            **kwargs: 其他在paddleocr --help中显示的参数
         """
+        # 解析参数
         params = parse_args(mMain=False)
+        # params是一个对象，params.__dict__.update(**kwargs)这行代码的意思是将kwargs字典中的键值对更新到params对象的属性中。这样，你就可以像访问对象的属性一样访问kwargs中的键值对了。
         params.__dict__.update(**kwargs)
-        assert params.ocr_version in SUPPORT_OCR_MODEL_VERSION, "ocr_version must in {}, but get {}".format(
+        # 检查OCR版本是否支持
+        assert params.ocr_version in SUPPORT_OCR_MODEL_VERSION, "ocr_version必须在{}中，但是得到{}".format(
             SUPPORT_OCR_MODEL_VERSION, params.ocr_version)
+        # 检查是否使用GPU
         params.use_gpu = check_gpu(params.use_gpu)
 
+        # 如果不显示日志，则将日志级别设置为INFO
         if not params.show_log:
             logger.setLevel(logging.INFO)
         self.use_angle_cls = params.use_angle_cls
+        # 解析语言
         lang, det_lang = parse_lang(params.lang)
 
-        # init model dir
+        # 初始化模型目录
+        # 获取检测模型配置
         det_model_config = get_model_config('OCR', params.ocr_version, 'det',
                                             det_lang)
+        # 确定检测模型目录和URL
         params.det_model_dir, det_url = confirm_model_dir_url(
             params.det_model_dir,
             os.path.join(BASE_DIR, 'whl', 'det', det_lang),
             det_model_config['url'])
+        # 获取识别模型配置
         rec_model_config = get_model_config('OCR', params.ocr_version, 'rec',
                                             lang)
+        # 确定识别模型目录和URL
         params.rec_model_dir, rec_url = confirm_model_dir_url(
             params.rec_model_dir,
             os.path.join(BASE_DIR, 'whl', 'rec', lang), rec_model_config['url'])
+        # 获取分类模型配置
         cls_model_config = get_model_config('OCR', params.ocr_version, 'cls',
                                             'ch')
+        # 确定分类模型目录和URL
         params.cls_model_dir, cls_url = confirm_model_dir_url(
             params.cls_model_dir,
             os.path.join(BASE_DIR, 'whl', 'cls'), cls_model_config['url'])
+        # 设置图像形状
         if params.ocr_version in ['PP-OCRv3', 'PP-OCRv4']:
             params.rec_image_shape = "3, 48, 320"
         else:
             params.rec_image_shape = "3, 32, 320"
-        # download model if using paddle infer
+
+        # 如果使用paddle infer，下载模型
         if not params.use_onnx:
             maybe_download(params.det_model_dir, det_url)
             maybe_download(params.rec_model_dir, rec_url)
             maybe_download(params.cls_model_dir, cls_url)
 
+        # 检查检测和识别算法是否支持
         if params.det_algorithm not in SUPPORT_DET_MODEL:
-            logger.error('det_algorithm must in {}'.format(SUPPORT_DET_MODEL))
+            logger.error('det_algorithm必须在{}'.format(SUPPORT_DET_MODEL))
             sys.exit(0)
         if params.rec_algorithm not in SUPPORT_REC_MODEL:
-            logger.error('rec_algorithm must in {}'.format(SUPPORT_REC_MODEL))
+            logger.error('rec_algorithm必须在{}'.format(SUPPORT_REC_MODEL))
             sys.exit(0)
 
+        # 如果没有设置字符识别字典路径，则使用默认路径
         if params.rec_char_dict_path is None:
             params.rec_char_dict_path = str(
                 Path(__file__).parent / rec_model_config['dict_path'])
 
-        logger.debug(params)
-        # init det_model and rec_model
+        # 初始化检测模型和识别模型
         super().__init__(params)
         self.page_num = params.page_num
 
@@ -625,27 +667,31 @@ class PaddleOCR(predict_system.TextSystem):
             inv=False,
             alpha_color=(255, 255, 255)):
         """
-        OCR with PaddleOCR
-        args：
-            img: img for OCR, support ndarray, img_path and list or ndarray
-            det: use text detection or not. If False, only rec will be exec. Default is True
-            rec: use text recognition or not. If False, only det will be exec. Default is True
-            cls: use angle classifier or not. Default is True. If True, the text with rotation of 180 degrees can be recognized. If no text is rotated by 180 degrees, use cls=False to get better performance. Text with rotation of 90 or 270 degrees can be recognized even if cls=False.
-            bin: binarize image to black and white. Default is False.
-            inv: invert image colors. Default is False.
-            alpha_color: set RGB color Tuple for transparent parts replacement. Default is pure white.
+        使用PaddleOCR进行OCR
+        参数：
+            img: 进行OCR的图像，支持ndarray，img_path和list或ndarray
+            det: 是否使用文本检测。如果为False，只会执行rec。默认为True
+            rec: 是否使用文本识别。如果为False，只会执行det。默认为True
+            cls: 是否使用角度分类器。默认为True。如果为True，可以识别旋转180度的文本。如果没有文本旋转180度，使用cls=False可以获得更好的性能。即使cls=False，也可以识别旋转90或270度的文本。
+            bin: 将图像二值化为黑白。默认为False。
+            inv: 反转图像颜色。默认为False。
+            alpha_color: 设置透明部分替换的RGB颜色元组。默认为纯白色。
         """
+        # 检查图像类型
         assert isinstance(img, (np.ndarray, list, str, bytes))
+        # 当输入的是图像列表，并且需要进行检测时，返回错误
         if isinstance(img, list) and det == True:
-            logger.error('When input a list of images, det must be false')
+            logger.error('当输入的是图像列表时，det必须为false')
             exit(0)
+        # 如果没有初始化角度分类器，但是在前向过程中需要使用，返回警告
         if cls == True and self.use_angle_cls == False:
             logger.warning(
-                'Since the angle classifier is not initialized, it will not be used during the forward process'
+                '由于角度分类器没有初始化，所以在前向过程中不会使用它'
             )
 
+        # 检查图像
         img = check_img(img)
-        # for infer pdf file
+        # 如果图像是PDF文件
         if isinstance(img, list):
             if self.page_num > len(img) or self.page_num == 0:
                 self.page_num = len(img)
@@ -653,6 +699,7 @@ class PaddleOCR(predict_system.TextSystem):
         else:
             imgs = [img]
 
+        # 预处理图像
         def preprocess_image(_image):
             _image = alpha_to_color(_image, alpha_color)
             if inv:
@@ -661,6 +708,7 @@ class PaddleOCR(predict_system.TextSystem):
                 _image = binarize_img(_image)
             return _image
 
+        # 如果进行检测和识别
         if det and rec:
             ocr_res = []
             for idx, img in enumerate(imgs):
@@ -673,6 +721,7 @@ class PaddleOCR(predict_system.TextSystem):
                            for box, res in zip(dt_boxes, rec_res)]
                 ocr_res.append(tmp_res)
             return ocr_res
+        # 如果只进行检测
         elif det and not rec:
             ocr_res = []
             for idx, img in enumerate(imgs):
@@ -684,6 +733,7 @@ class PaddleOCR(predict_system.TextSystem):
                 tmp_res = [box.tolist() for box in dt_boxes]
                 ocr_res.append(tmp_res)
             return ocr_res
+        # 如果只进行识别
         else:
             ocr_res = []
             cls_res = []
@@ -700,6 +750,7 @@ class PaddleOCR(predict_system.TextSystem):
             if not rec:
                 return cls_res
             return ocr_res
+
 
 
 class PPStructure(StructureSystem):
@@ -772,6 +823,7 @@ def main():
     # for cmd
     args = parse_args(mMain=True)
     image_dir = args.image_dir
+    print("image_dir==="+image_dir)
     if is_link(image_dir):
         download_with_progressbar(image_dir, 'tmp.jpg')
         image_file_list = ['tmp.jpg']
@@ -865,3 +917,6 @@ def main():
                 item.pop('res')
                 logger.info(item)
             logger.info('result save to {}'.format(args.output))
+
+
+main()
